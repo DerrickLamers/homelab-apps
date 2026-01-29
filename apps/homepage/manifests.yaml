@@ -108,15 +108,38 @@ spec:
       containers:
         - name: homepage
           image: ghcr.io/gethomepage/homepage:latest
+          env:
+            - name: HOMEPAGE_ALLOWED_HOSTS
+              value: "home.local.lamers.tech"
           ports:
             - containerPort: 3000
           volumeMounts:
             - name: config
-              mountPath: /app/config
+              mountPath: /app/config/settings.yaml
+              subPath: settings.yaml
+            - name: config
+              mountPath: /app/config/widgets.yaml
+              subPath: widgets.yaml
+            - name: config
+              mountPath: /app/config/services.yaml
+              subPath: services.yaml
+            - name: config
+              mountPath: /app/config/bookmarks.yaml
+              subPath: bookmarks.yaml
+            - name: config
+              mountPath: /app/config/docker.yaml
+              subPath: docker.yaml
+            - name: config
+              mountPath: /app/config/kubernetes.yaml
+              subPath: kubernetes.yaml
+            - name: logs
+              mountPath: /app/config/logs
       volumes:
         - name: config
           configMap:
             name: homepage-config
+        - name: logs
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
