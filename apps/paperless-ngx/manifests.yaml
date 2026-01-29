@@ -220,7 +220,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: paperless
+  name: paperless-svc
   namespace: paperless
 spec:
   selector:
@@ -253,7 +253,7 @@ spec:
     - match: Host(`paperless.local.lamers.tech`)
       kind: Rule
       services:
-        - name: paperless
+        - name: paperless-svc
           port: 8000
   tls:
     secretName: paperless-cert-tls
