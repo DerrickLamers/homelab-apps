@@ -34,7 +34,7 @@ data:
             href: https://traefik.local.lamers.tech
             description: Ingress Controller
         - ArgoCD:
-            icon: argocd.png
+            icon: argo-cd.png
             href: https://argocd.local.lamers.tech
             description: GitOps
         - Grafana:
