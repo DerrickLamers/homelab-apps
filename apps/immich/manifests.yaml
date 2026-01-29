@@ -1,0 +1,274 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: immich
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: immich-secrets
+  namespace: immich
+spec:
+  itemPath: "vaults/homelab/items/immich"
+---
+# PostgreSQL
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: immich
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: tensorchord/pgvecto-rs:pg15-v0.2.0
+          env:
+            - name: POSTGRES_DB
+              value: immich
+            - name: POSTGRES_USER
+              value: immich
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: immich-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: immich-postgres-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-postgres-pvc
+  namespace: immich
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: longhorn
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: immich
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+---
+# Redis
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: immich
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7
+          ports:
+            - containerPort: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: immich
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+---
+# Immich Server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-server
+  namespace: immich
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: immich-server
+  template:
+    metadata:
+      labels:
+        app: immich-server
+    spec:
+      containers:
+        - name: immich-server
+          image: ghcr.io/immich-app/immich-server:release
+          env:
+            - name: DB_HOSTNAME
+              value: postgres
+            - name: DB_USERNAME
+              value: immich
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: immich-secrets
+                  key: DB_PASSWORD
+            - name: DB_DATABASE_NAME
+              value: immich
+            - name: REDIS_HOSTNAME
+              value: redis
+            - name: IMMICH_MACHINE_LEARNING_URL
+              value: http://immich-ml:3003
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: immich-secrets
+                  key: JWT_SECRET
+          ports:
+            - containerPort: 2283
+          volumeMounts:
+            - name: upload
+              mountPath: /usr/src/app/upload
+      volumes:
+        - name: upload
+          persistentVolumeClaim:
+            claimName: immich-upload-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-upload-pvc
+  namespace: immich
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: longhorn
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-server-svc
+  namespace: immich
+spec:
+  selector:
+    app: immich-server
+  ports:
+    - port: 2283
+---
+# Immich Machine Learning
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-ml
+  namespace: immich
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: immich-ml
+  template:
+    metadata:
+      labels:
+        app: immich-ml
+    spec:
+      containers:
+        - name: immich-ml
+          image: ghcr.io/immich-app/immich-machine-learning:release
+          env:
+            - name: IMMICH_HOST
+              value: "0.0.0.0"
+            - name: IMMICH_PORT
+              value: "3003"
+          ports:
+            - containerPort: 3003
+          volumeMounts:
+            - name: model-cache
+              mountPath: /cache
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: immich-ml-cache-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-ml-cache-pvc
+  namespace: immich
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: longhorn
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-ml
+  namespace: immich
+spec:
+  selector:
+    app: immich-ml
+  ports:
+    - port: 3003
+---
+# Certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: immich-cert
+  namespace: immich
+spec:
+  secretName: immich-cert-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "photos.local.lamers.tech"
+---
+# IngressRoute
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: immich
+  namespace: immich
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`photos.local.lamers.tech`)
+      kind: Rule
+      services:
+        - name: immich-server-svc
+          port: 2283
+  tls:
+    secretName: immich-cert-tls
